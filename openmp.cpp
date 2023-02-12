@@ -10,9 +10,11 @@
 
 #define MAX_P 5
 
+// the grid class should have a size of 16 bytes
 typedef struct grid_class {
     int num_p;
-    particle_t* members[MAX_P];
+    int _padding; 
+    particle_t* members[MAX_P+10]; 
 } grid_class;
 
 
@@ -73,13 +75,10 @@ static inline void apply_force_all(int gx, int gy, particle_t* part) {
 
             if (grid->num_p > 0) {
                 for (int j = 0; j < MAX_P; j++) {
-                    if (grid->members[j] == NULL) {
+                    // If the neighbor is the particle itself, we don't need to consider the force.
+                    if (grid->members[j] == NULL || part == grid->members[j]) {
                         continue;
                     }
-                    // If the neighbor is the particle itself, we don't need to consider the force.
-                    if (part == grid->members[j]){
-                        continue;
-                    } 
                     apply_force(*part, *grid->members[j]);
                 }
             }
@@ -132,7 +131,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
-#pragma omp for
+#pragma omp for collapse(2)
     // Update the grids
     for (int i = 0; i < ngrid; i++) {
         for (int j = 0; j < ngrid; j++) {
@@ -187,29 +186,27 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
         }
     }
 
-    #pragma omp for
+    #pragma omp for collapse(2)
         // Compute Forces
         for(int i = 0; i < ngrid * ngrid; i++) {
-            if (0 != grids[i].num_p) {
-                for (int j = 0; j < MAX_P; j++) {
-                    if (grids[i].members[j] == NULL) continue;
-                    particle_t* part = grids[i].members[j];
-                    part->ax = part->ay = 0;
-                    int gx = (int)(part->x / cutoff) - 1;
-                    int gy = (int)(part->y / cutoff) - 1;
-                    if(gx < 0) {
-                        gx = 0;
-                    }
-                    if(gy < 0) {
-                        gy = 0;
-                    }
-                    apply_force_all(gx, gy, part);
+            for (int j = 0; j < MAX_P; j++) {
+                if (0 == grids[i].num_p || grids[i].members[j] == NULL) continue;
+                particle_t* part = grids[i].members[j];
+                part->ax = part->ay = 0;
+                int gx = (int)(part->x / cutoff) - 1;
+                int gy = (int)(part->y / cutoff) - 1;
+                if(gx < 0) {
+                    gx = 0;
                 }
+                if(gy < 0) {
+                    gy = 0;
+                }
+                apply_force_all(gx, gy, part);
             }
         }
 
     // Move Particles
-    #pragma omp for
+    #pragma omp for schedule(static, 1024)
         for (int i = 0; i < num_parts; i++) {
             move(parts[i], size);
         }

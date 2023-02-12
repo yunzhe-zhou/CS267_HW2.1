@@ -115,7 +115,6 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     }
 }
 
-
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Update the grids
     for (int i = 0; i < ngrid; i++) {
