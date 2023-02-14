@@ -129,8 +129,8 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
         }
 }
 
-
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
+
 #pragma omp for collapse(2)
     // Update the grids
     for (int i = 0; i < ngrid; i++) {
@@ -155,18 +155,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
 
                 id2 = gx * ngrid + gy;
 
-                // Use double locks in order to avoid deadlocks
-                omp_lock_t *lock1, *lock2;
-                if (id1 < id2){
-                    lock1 = &locks[id1];
-                    lock2 = &locks[id2];
-                } else{
-                    lock1 = &locks[id2];
-                    lock2 = &locks[id1];                  
-                }
-
-                omp_set_lock(lock1);
-                omp_set_lock(lock2);
+                omp_set_lock(&locks[id2]);
 
                 for (int ii = 0; ii < MAX_P; ii++) {
                     if (new_grid->members[ii] == NULL) {
@@ -174,14 +163,14 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                         new_grid->num_p++;
                         new_grid->members[ii] = grid->members[k];
                         // Remove the member from its previous grid.
+                        #pragma omp atomic 
                         grid->num_p--;
                         grid->members[k] = NULL;
                         break;
                     }
                 }
 
-                omp_unset_lock(lock2);
-                omp_unset_lock(lock1);
+                omp_unset_lock(&locks[id2]);
             }
         }
     }
