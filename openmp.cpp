@@ -10,6 +10,9 @@
 
 #define MAX_P 5
 
+#define w  cutoff
+#define h cutoff 
+
 typedef struct grid_class {
     int num_p;
     particle_t* members[MAX_P];
@@ -17,6 +20,8 @@ typedef struct grid_class {
 
 
 int ngrid;
+int width;
+int height;
 grid_class* grids;
 omp_lock_t* locks;
 
@@ -66,10 +71,10 @@ static inline void apply_force_all(int gx, int gy, particle_t* part) {
     for (int px = gx; px < gx + 3; px++) {
         for (int py = gy; py < gy + 3; py++) {
             // If the neighbor is outside the grid, let's abondon it.
-            if (px >= ngrid || py >= ngrid) continue;
+            if (px >= width || py >= height) continue;
 
             // Assign the grid for this neighbor.
-            grid_class* grid = &grids[px * ngrid + py];
+            grid_class* grid = &grids[px * width + py];
 
             if (grid->num_p > 0) {
                 for (int j = 0; j < MAX_P; j++) {
@@ -95,15 +100,17 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // algorithm begins. Do not do any particle simulation here
 
     // Determine the number of grids
-    ngrid = (int)ceil(size / cutoff);
+    //ngrid = (int)ceil(size / cutoff);
+    width = (int)ceil(size / w);
+    height = (int)ceil(size / h);
     // Allocate the memory spaces for the whole grids
-    grids = (grid_class*)calloc(ngrid * ngrid, sizeof(grid_class));
+    grids = (grid_class*)calloc(width * height, sizeof(grid_class));
 
     //Initialize the locks
-    locks = (omp_lock_t*)calloc(ngrid * ngrid, sizeof(omp_lock_t));
+    locks = (omp_lock_t*)calloc(width * height, sizeof(omp_lock_t));
 
     #pragma omp for
-        for(int i = 0; i < ngrid * ngrid; i++) {
+        for(int i = 0; i < width * height; i++) {
             omp_init_lock(locks + i);
         }
 
@@ -111,15 +118,15 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
         // Assign particles to each grid
         for (int i = 0; i < num_parts; i++) {
             // Get the location of grid for the particle
-            int gx = (int)(parts[i].x / cutoff);
-            int gy = (int)(parts[i].y / cutoff);
+            int gx = (int)(parts[i].x / w);
+            int gy = (int)(parts[i].y / h);
 
             // Assign the grid object
-            grid_class* grid = &grids[gx * ngrid + gy];
+            grid_class* grid = &grids[gx * width + gy];
 
-            //omp_set_lock(&locks[gx * ngrid + gy]);
+            omp_set_lock(&locks[gx * width + gy]);
 
-            /*
+            
             // Add the info of the particle into the grid and update num_p of the grid
             for (int ii = 0; ii < MAX_P; ii++) {
                 if (grid->members[ii] == NULL) {
@@ -128,10 +135,16 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
                     break;
                 }
             }
-            */
+            
+           /*
+           int v = grid -> num_p;
+           if (v < MAX_P){
             #pragma omp atomic 
-            grid -> members[grid -> num_p++] = &parts[i];
-            //omp_unset_lock(&locks[gx * ngrid + gy]);
+            grid -> num_p++;
+            grid -> members[v] = &parts[i];
+           }
+           */
+            omp_unset_lock(&locks[gx * width + gy]);
         }
 }
 
@@ -139,12 +152,12 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
 #pragma omp for collapse(2) 
     // Update the grids
-    for (int i = 0; i < ngrid; i++) {
-        for (int j = 0; j < ngrid; j++) {
+    for (int i = 0; i < width; i++) {
+        for (int j = 0; j < height; j++) {
             int id1, id2;
-            id1 = i * ngrid + j;
+            id1 = i * width + j;
             // Consider each grid
-            grid_class* grid = &grids[i * ngrid + j];
+            grid_class* grid = &grids[i * width + j];
             // If it is empty, let's skip it.
             if (grid->num_p == 0) continue;
             for (int k = 0; k < MAX_P; k++) {
@@ -152,14 +165,14 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                 particle_t* part = grid->members[k];
                 if (part == NULL) continue;
                 // Get the updated grid location for this member after being applied the force.
-                int gx = (int)(part->x / cutoff);
-                int gy = (int)(part->y / cutoff);
+                int gx = (int)(part->x / w);
+                int gy = (int)(part->y / h);
                 // If the location remains the same, let's skip it.
                 if (gx == i && gy == j) continue;
                 // Update the grid of this member.
-                grid_class* new_grid = &grids[gx * ngrid + gy];
+                grid_class* new_grid = &grids[gx * width + gy];
 
-                id2 = gx * ngrid + gy;
+                id2 = gx * width + gy;
 
                 omp_set_lock(&locks[id2]);
 
@@ -182,15 +195,15 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
         }
     }
 
-    #pragma omp for collapse(2)
+    #pragma omp for 
         // Compute Forces
-        for(int i = 0; i < ngrid * ngrid; i++) {
+        for(int i = 0; i < width * height; i++) {
             for (int j = 0; j < MAX_P; j++) {
                 if (0 == grids[i].num_p || grids[i].members[j] == NULL) continue;
                 particle_t* part = grids[i].members[j];
                 part->ax = part->ay = 0;
-                int gx = (int)(part->x / cutoff) - 1;
-                int gy = (int)(part->y / cutoff) - 1;
+                int gx = (int)(part->x / w) - 1;
+                int gy = (int)(part->y / h) - 1;
                 if(gx < 0) {
                     gx = 0;
                 }
