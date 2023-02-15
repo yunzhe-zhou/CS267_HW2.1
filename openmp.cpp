@@ -87,6 +87,8 @@ static inline void apply_force_all(int gx, int gy, particle_t* part) {
     }
 }
 
+// trying different bin size requires this to be changed. 
+
 void init_simulation(particle_t* parts, int num_parts, double size) {
     // You can use this space to initialize static, global data objects
     // that you may need. This function will be called once before the
@@ -115,8 +117,9 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
             // Assign the grid object
             grid_class* grid = &grids[gx * ngrid + gy];
 
-            omp_set_lock(&locks[gx * ngrid + gy]);
+            //omp_set_lock(&locks[gx * ngrid + gy]);
 
+            /*
             // Add the info of the particle into the grid and update num_p of the grid
             for (int ii = 0; ii < MAX_P; ii++) {
                 if (grid->members[ii] == NULL) {
@@ -125,14 +128,16 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
                     break;
                 }
             }
-
-            omp_unset_lock(&locks[gx * ngrid + gy]);
+            */
+            #pragma omp atomic 
+            grid -> members[grid -> num_p++] = &parts[i];
+            //omp_unset_lock(&locks[gx * ngrid + gy]);
         }
 }
 
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
-#pragma omp for
+#pragma omp for collapse(2) 
     // Update the grids
     for (int i = 0; i < ngrid; i++) {
         for (int j = 0; j < ngrid; j++) {
@@ -156,57 +161,46 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
 
                 id2 = gx * ngrid + gy;
 
-                // Use double locks in order to avoid deadlocks
-                omp_lock_t *lock1, *lock2;
-                if (id1 < id2){
-                    lock1 = &locks[id1];
-                    lock2 = &locks[id2];
-                } else{
-                    lock1 = &locks[id2];
-                    lock2 = &locks[id1];                  
-                }
+                omp_set_lock(&locks[id2]);
 
-                omp_set_lock(lock1);
-                omp_set_lock(lock2);
-
+          
                 for (int ii = 0; ii < MAX_P; ii++) {
                     if (new_grid->members[ii] == NULL) {
                         // Add the member to the new updated grid.
                         new_grid->num_p++;
                         new_grid->members[ii] = grid->members[k];
                         // Remove the member from its previous grid.
+                        #pragma omp atomic 
                         grid->num_p--;
                         grid->members[k] = NULL;
                         break;
                     }
                 }
 
-                omp_unset_lock(lock2);
-                omp_unset_lock(lock1);
+                omp_unset_lock(&locks[id2]);
             }
         }
     }
 
-    #pragma omp for
+    #pragma omp for collapse(2)
         // Compute Forces
         for(int i = 0; i < ngrid * ngrid; i++) {
-            if (0 != grids[i].num_p) {
-                for (int j = 0; j < MAX_P; j++) {
-                    if (grids[i].members[j] == NULL) continue;
-                    particle_t* part = grids[i].members[j];
-                    part->ax = part->ay = 0;
-                    int gx = (int)(part->x / cutoff) - 1;
-                    int gy = (int)(part->y / cutoff) - 1;
-                    if(gx < 0) {
-                        gx = 0;
-                    }
-                    if(gy < 0) {
-                        gy = 0;
-                    }
-                    apply_force_all(gx, gy, part);
+            for (int j = 0; j < MAX_P; j++) {
+                if (0 == grids[i].num_p || grids[i].members[j] == NULL) continue;
+                particle_t* part = grids[i].members[j];
+                part->ax = part->ay = 0;
+                int gx = (int)(part->x / cutoff) - 1;
+                int gy = (int)(part->y / cutoff) - 1;
+                if(gx < 0) {
+                    gx = 0;
                 }
+                if(gy < 0) {
+                    gy = 0;
+                }
+                apply_force_all(gx, gy, part);
             }
         }
+    
 
     // Move Particles
     #pragma omp for
