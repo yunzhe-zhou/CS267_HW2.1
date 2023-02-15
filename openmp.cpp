@@ -129,48 +129,80 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
         }
 }
 
+int* get_block_size(int a) {
+    int sqrt_a = (int)ceil(sqrt(a));
+    int* res = (int*)malloc(sizeof(int) * 2);
+    for (int i = sqrt_a; i >= 1; i--) {
+        if (a % i == 0) {
+            
+            res[0] = i;
+            res[1] = a / i;
+            break;
+        }
+    }
+    return res;
+}
+
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
+    int* block_size = get_block_size(omp_get_num_threads());
+    int block_x = (int)ceil(ngrid / block_size[0]);
+    int block_y = (int)ceil(ngrid / block_size[1]);
 
 #pragma omp for collapse(2)
-    // Update the grids
-    for (int i = 0; i < ngrid; i++) {
-        for (int j = 0; j < ngrid; j++) {
-            int id1, id2;
-            id1 = i * ngrid + j;
-            // Consider each grid
-            grid_class* grid = &grids[i * ngrid + j];
-            // If it is empty, let's skip it.
-            if (grid->num_p == 0) continue;
-            for (int k = 0; k < MAX_P; k++) {
-                // Consider each member of the grid
-                particle_t* part = grid->members[k];
-                if (part == NULL) continue;
-                // Get the updated grid location for this member after being applied the force.
-                int gx = (int)(part->x / cutoff);
-                int gy = (int)(part->y / cutoff);
-                // If the location remains the same, let's skip it.
-                if (gx == i && gy == j) continue;
-                // Update the grid of this member.
-                grid_class* new_grid = &grids[gx * ngrid + gy];
+    // Update the grid
+    for (int i = 0; i < ngrid; i+=block_x) {
+        for (int j = 0; j < ngrid; j+=block_y) {
+            for (int iii = i; iii < std::min(ngrid, i+block_x); iii++) {
+                for (int jjj = j; jjj < std::min(ngrid, j+block_y); jjj++) {
+                    int id1, id2;
+                    id1 = iii * ngrid + jjj;
+                    // Consider each grid
+                    grid_class* grid = &grids[id1];
+                    // If it is empty, let's skip it.
+                    if (grid->num_p == 0) continue;
+                    for (int k = 0; k < MAX_P; k++) {
+                        // Consider each member of the grid
+                        particle_t* part = grid->members[k];
+                        if (part == NULL) continue;
+                        // Get the updated grid location for this member after being applied the force.
+                        int gx = (int)(part->x / cutoff);
+                        int gy = (int)(part->y / cutoff);
+                        // If the location remains the same, let's skip it.
+                        if (gx == iii && gy == jjj) continue;
+                        // Update the grid of this member.
+                        id2 = gx * ngrid + gy;
+                        grid_class* new_grid = &grids[id2];
 
-                id2 = gx * ngrid + gy;
+                        omp_set_lock(&locks[id2]);
 
-                omp_set_lock(&locks[id2]);
+                        // if (!(gx < std::min(ngrid, i+block_x) && gy < std::min(ngrid, j+block_y) && gx >= i && gy >= j)) {
+                        //     // Remove the member from its previous grid.
+                        //     // #pragma omp atomic 
+                        //     // grid->num_p--;
+                        //     // grid->members[k] = NULL;
+                        //     omp_set_lock(&locks[id2]);
+                        // }
 
-                for (int ii = 0; ii < MAX_P; ii++) {
-                    if (new_grid->members[ii] == NULL) {
-                        // Add the member to the new updated grid.
-                        new_grid->num_p++;
-                        new_grid->members[ii] = grid->members[k];
-                        // Remove the member from its previous grid.
-                        #pragma omp atomic 
-                        grid->num_p--;
-                        grid->members[k] = NULL;
-                        break;
+                        for (int ii = 0; ii < MAX_P; ii++) {
+                            if (new_grid->members[ii] == NULL) {
+                                // Add the member to the new updated grid.
+                                new_grid->num_p++;
+                                new_grid->members[ii] = grid->members[k];
+                                // Remove the member from its previous grid.
+                                // #pragma omp atomic 
+                                grid->num_p--;
+                                grid->members[k] = NULL;
+                                break;
+                            }
+                        }
+
+                        // if (!(gx < std::min(ngrid, i+block_x) && gy < std::min(ngrid, j+block_y) && gx >= i && gy >= j)) {
+                        //     omp_unset_lock(&locks[id2]);
+                        // }
+
+                        omp_unset_lock(&locks[id2]);
                     }
                 }
-
-                omp_unset_lock(&locks[id2]);
             }
         }
     }
@@ -200,4 +232,3 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
             move(parts[i], size);
         }
 }
-
