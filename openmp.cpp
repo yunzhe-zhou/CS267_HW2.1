@@ -9,6 +9,7 @@
 #include <omp.h>
 
 #define MAX_P 5
+#define RANGE 0.02
 
 typedef struct grid_class {
     int num_p;
@@ -93,7 +94,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // algorithm begins. Do not do any particle simulation here
 
     // Determine the number of grids
-    ngrid = (int)ceil(size / cutoff);
+    ngrid = (int)ceil(size / RANGE);
     // Allocate the memory spaces for the whole grids
     grids = (grid_class*)calloc(ngrid * ngrid, sizeof(grid_class));
 
@@ -109,8 +110,8 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
         // Assign particles to each grid
         for (int i = 0; i < num_parts; i++) {
             // Get the location of grid for the particle
-            int gx = (int)(parts[i].x / cutoff);
-            int gy = (int)(parts[i].y / cutoff);
+            int gx = (int)(parts[i].x / RANGE);
+            int gy = (int)(parts[i].y / RANGE);
 
             // Assign the grid object
             grid_class* grid = &grids[gx * ngrid + gy];
@@ -147,8 +148,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                 particle_t* part = grid->members[k];
                 if (part == NULL) continue;
                 // Get the updated grid location for this member after being applied the force.
-                int gx = (int)(part->x / cutoff);
-                int gy = (int)(part->y / cutoff);
+                int gx = (int)(part->x / RANGE);
+                int gy = (int)(part->y / RANGE);
                 // If the location remains the same, let's skip it.
                 if (gx == i && gy == j) continue;
                 // Update the grid of this member.
@@ -195,8 +196,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                     if (grids[i].members[j] == NULL) continue;
                     particle_t* part = grids[i].members[j];
                     part->ax = part->ay = 0;
-                    int gx = (int)(part->x / cutoff) - 1;
-                    int gy = (int)(part->y / cutoff) - 1;
+                    int gx = (int)(part->x / RANGE) - 1;
+                    int gy = (int)(part->y / RANGE) - 1;
                     if(gx < 0) {
                         gx = 0;
                     }
@@ -214,4 +215,5 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
             move(parts[i], size);
         }
 }
+
 
