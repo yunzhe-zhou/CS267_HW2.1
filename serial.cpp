@@ -6,7 +6,8 @@
 #include <iostream>
 #include <random>
 #include <vector>
-
+#include <unordered_map>
+#include <map> 
 #define MAX_P 5
 
 typedef struct grid_class {
@@ -16,7 +17,30 @@ typedef struct grid_class {
 
 
 int ngrid;
-grid_class* grids;
+
+
+
+unordered_map<unsigned int, grid_class *> grids;
+//omp_lock_t* locks;
+
+//x will be "i" and y will be "j" -- essentially interweave the bits of x and y
+int find_z(int x, int y){
+    int max_bits = (int) ceil(log2(ngrid));
+    int new_num = 0;
+
+    int i;
+    for (i = 0; i < max_bits * 2; i++) {
+        if(i % 2){
+            new_num |= (y % 2) << i;
+
+        } else {
+            new_num |= (x % 2) << i;
+            x /= 2;
+        }
+    }
+    return new_num;
+}
+
 
 
 // Apply the force from neighbor to particle
@@ -67,7 +91,7 @@ static inline void apply_force_all(int gx, int gy, particle_t* part) {
             if (px >= ngrid || py >= ngrid) continue;
 
             // Assign the grid for this neighbor.
-            grid_class* grid = &grids[px * ngrid + py];
+            grid_class* grid = &grids[find_z(px, py)];
 
             if (grid->num_p > 0) {
                 for (int j = 0; j < MAX_P; j++) {
@@ -93,7 +117,12 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     // Determine the number of grids
     ngrid = (int)ceil(size / cutoff);
     // Allocate the memory spaces for the whole grids
-    grids = (grid_class*)calloc(ngrid * ngrid, sizeof(grid_class));
+
+    for (int i = 0; i < ngrid; i++) {
+        for(int j = 0; j < ngrid; j++){
+            grids[find_z(i, j)] = (grid_class *) calloc(1, sizeof(grid_class));
+        }
+    }
 
     // Assign particles to each grid
     for (int i = 0; i < num_parts; i++) {
@@ -102,7 +131,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
         int gy = (int)(parts[i].y / cutoff);
 
         // Assign the grid object
-        grid_class* grid = &grids[gx * ngrid + gy];
+        grid_class* grid = &grids[find_z(gx, gy)];
 
         // Add the info of the particle into the grid and update num_p of the grid
         for (int ii = 0; ii < MAX_P; ii++) {
@@ -121,7 +150,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     for (int i = 0; i < ngrid; i++) {
         for (int j = 0; j < ngrid; j++) {
             // Consider each grid
-            grid_class* grid = &grids[i * ngrid + j];
+            grid_class* grid = &grids[find_z(i, j)];
             // If it is empty, let's skip it.
             if (grid->num_p == 0) continue;
             for (int k = 0; k < MAX_P; k++) {
@@ -134,7 +163,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
                 // If the location remains the same, let's skip it.
                 if (gx == i && gy == j) continue;
                 // Update the grid of this member.
-                grid_class* new_grid = &grids[gx * ngrid + gy];
+                grid_class* new_grid = &grids[find_z(gx, gy)];
 
                 for (int ii = 0; ii < MAX_P; ii++) {
                     if (new_grid->members[ii] == NULL) {
@@ -152,25 +181,26 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     }
 
     // Compute Forces
-    for(int i = 0; i < ngrid * ngrid; i++) {
-        if (0 != grids[i].num_p) {
-            for (int j = 0; j < MAX_P; j++) {
-                if (grids[i].members[j] == NULL) continue;
-                particle_t* part = grids[i].members[j];
-                part->ax = part->ay = 0;
-                int gx = (int)(part->x / cutoff) - 1;
-                int gy = (int)(part->y / cutoff) - 1;
-                if(gx < 0) {
-                    gx = 0;
+    for(int i = 0; i < ngrid; i++){
+            for(int j = 0; j < ngrid; j++) {
+                if (grids[find_z(i, j)] != 0) {
+                    for (int k = 0; k < MAX_P; k++) {
+                        if (grids[find_z(i, j)].members[k] == NULL) continue;
+                        particle_t * part = grids[find_z(i, j)].members[k];
+                        part -> ax = part -> ay = 0;
+                        int gx = (int)(part->x / cutoff) - 1;
+                        int gy = (int)(part->y / cutoff) - 1;
+                        if(gx < 0) {
+                            gx = 0;
+                        }
+                        if(gy < 0) {
+                            gy = 0;
+                        }
+                        apply_force_all(gx, gy, part);
+                    }
                 }
-                if(gy < 0) {
-                    gy = 0;
-                }
-                apply_force_all(gx, gy, part);
             }
         }
-    }
-
     // Move Particles
     for (int i = 0; i < num_parts; i++) {
         move(parts[i], size);
